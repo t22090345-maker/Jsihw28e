@@ -29,6 +29,7 @@ jobs:
           mkdir -p app/src/main/java/com/example/networkmonitor
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
 
       - name: 📝 settings.gradle
         run: |
@@ -110,6 +111,18 @@ jobs:
           }
           EOF
 
+      - name: 📝 themes.xml
+        run: |
+          cat > app/src/main/res/values/themes.xml << 'EOF'
+          <resources>
+              <style name="Theme.NetworkMonitor" parent="Theme.Material3.DayNight.NoActionBar">
+                  <item name="colorPrimary">#1976D2</item>
+                  <item name="colorPrimaryVariant">#0D47A1</item>
+                  <item name="colorOnPrimary">#FFFFFF</item>
+              </style>
+          </resources>
+          EOF
+
       - name: 📝 AndroidManifest.xml
         run: |
           cat > app/src/main/AndroidManifest.xml << 'EOF'
@@ -122,7 +135,9 @@ jobs:
               <application
                   android:allowBackup="true"
                   android:label="@string/app_name"
-                  android:theme="@android:style/Theme.Material.Light">
+                  android:icon="@drawable/ic_launcher"
+                  android:roundIcon="@drawable/ic_launcher"
+                  android:theme="@style/Theme.NetworkMonitor">
                   <activity
                       android:name=".MainActivity"
                       android:exported="true">
@@ -139,9 +154,29 @@ jobs:
                       <intent-filter>
                           <action android:name="android.net.VpnService" />
                       </intent-filter>
+                      <property
+                          android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                          android:value="network-monitoring" />
                   </service>
               </application>
           </manifest>
+          EOF
+
+      - name: 📝 ic_launcher.xml (App Logo)
+        run: |
+          cat > app/src/main/res/drawable/ic_launcher.xml << 'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#1976D2"
+                  android:pathData="M54,54m-50,0a50,50 0,1 1,100 0a50,50 0,1 1,-100 0"/>
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M54,34c-11.05,0 -20,8.95 -20,20h-6c0,-14.36 11.64,-26 26,-26s26,11.64 26,26h-6c0,-11.05 -8.95,-20 -20,-20zM54,44c-5.52,0 -10,4.48 -10,10h-6c0,-8.84 7.16,-16 16,-16s16,7.16 16,16h-6c0,-5.52 -4.48,-10 -10,-10zM54,54c-2.76,0 -5,2.24 -5,5s2.24,5 5,5s5,-2.24 5,-5S56.76,54 54,54z"/>
+          </vector>
           EOF
 
       - name: 📝 strings.xml
@@ -515,22 +550,10 @@ jobs:
       - name: 🔨 Build Debug APK
         run: gradle assembleDebug --stacktrace --no-daemon
 
-      - name: 🔨 Build Release APK
-        run: gradle assembleRelease --stacktrace --no-daemon
-        continue-on-error: true
-
       - name: 📤 Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
           name: NetworkMonitor-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 30
-
-      - name: 📤 Upload Release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: NetworkMonitor-release-apk
-          path: app/build/outputs/apk/release/*.apk
-          if-no-files-found: warn
           retention-days: 30
