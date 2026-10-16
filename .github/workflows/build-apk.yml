@@ -1,0 +1,534 @@
+name: Build Network Monitor APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: ☕ Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 🤖 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 📁 Create project structure
+        run: |
+          mkdir -p app/src/main/java/com/example/networkmonitor
+          mkdir -p app/src/main/res/layout
+          mkdir -p app/src/main/res/values
+
+      - name: 📝 settings.gradle
+        run: |
+          cat > settings.gradle << 'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "NetworkMonitor"
+          include ':app'
+          EOF
+
+      - name: 📝 build.gradle (root)
+        run: |
+          cat > build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application' version '8.4.0' apply false
+              id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
+          }
+          EOF
+
+      - name: 📝 gradle.properties
+        run: |
+          cat > gradle.properties << 'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          android.nonTransitiveRClass=true
+          EOF
+
+      - name: 📝 app/build.gradle
+        run: |
+          cat > app/build.gradle << 'EOF'
+          plugins {
+              id 'com.android.application'
+              id 'org.jetbrains.kotlin.android'
+          }
+          android {
+              namespace 'com.example.networkmonitor'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.example.networkmonitor"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              kotlinOptions { jvmTarget = '17' }
+              buildFeatures { viewBinding true }
+          }
+          dependencies {
+              implementation 'androidx.core:core-ktx:1.13.1'
+              implementation 'androidx.appcompat:appcompat:1.7.0'
+              implementation 'com.google.android.material:material:1.12.0'
+              implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+              implementation 'androidx.recyclerview:recyclerview:1.3.2'
+              implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.2'
+              implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+          }
+          EOF
+
+      - name: 📝 AndroidManifest.xml
+        run: |
+          cat > app/src/main/AndroidManifest.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <application
+                  android:allowBackup="true"
+                  android:label="@string/app_name"
+                  android:theme="@android:style/Theme.Material.Light">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+                  <service
+                      android:name=".MonitorVpnService"
+                      android:exported="false"
+                      android:permission="android.permission.BIND_VPN_SERVICE"
+                      android:foregroundServiceType="specialUse">
+                      <intent-filter>
+                          <action android:name="android.net.VpnService" />
+                      </intent-filter>
+                  </service>
+              </application>
+          </manifest>
+          EOF
+
+      - name: 📝 strings.xml
+        run: |
+          cat > app/src/main/res/values/strings.xml << 'EOF'
+          <resources>
+              <string name="app_name">NetworkMonitor</string>
+          </resources>
+          EOF
+
+      - name: 📝 activity_main.xml
+        run: |
+          cat > app/src/main/res/layout/activity_main.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:orientation="vertical"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:padding="12dp">
+              <LinearLayout
+                  android:orientation="horizontal"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content">
+                  <Button
+                      android:id="@+id/btnToggle"
+                      android:layout_width="0dp"
+                      android:layout_weight="1"
+                      android:layout_height="wrap_content"
+                      android:text="START MONITORING" />
+                  <Button
+                      android:id="@+id/btnClear"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:text="Clear" />
+              </LinearLayout>
+              <TextView
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:text="Protocol   Source → Destination   Size"
+                  android:textStyle="bold"
+                  android:paddingTop="8dp"
+                  android:paddingBottom="4dp"/>
+              <androidx.recyclerview.widget.RecyclerView
+                  android:id="@+id/recycler"
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1" />
+          </LinearLayout>
+          EOF
+
+      - name: 📝 item_traffic.xml
+        run: |
+          cat > app/src/main/res/layout/item_traffic.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:orientation="vertical"
+              android:layout_width="match_parent"
+              android:layout_height="wrap_content"
+              android:padding="8dp">
+              <LinearLayout
+                  android:orientation="horizontal"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content">
+                  <TextView
+                      android:id="@+id/txtProto"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:textStyle="bold"
+                      android:textColor="#1976D2"
+                      android:text="TCP"/>
+                  <TextView
+                      android:id="@+id/txtTime"
+                      android:layout_width="0dp"
+                      android:layout_weight="1"
+                      android:gravity="end"
+                      android:layout_height="wrap_content"
+                      android:textSize="11sp"
+                      android:text="00:00:00"/>
+                  <TextView
+                      android:id="@+id/txtLen"
+                      android:layout_width="wrap_content"
+                      android:layout_height="wrap_content"
+                      android:paddingStart="8dp"
+                      android:textSize="11sp"
+                      android:text="0 B"/>
+              </LinearLayout>
+              <TextView
+                  android:id="@+id/txtSrc"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:textSize="12sp"
+                  android:text="0.0.0.0"/>
+              <TextView
+                  android:id="@+id/txtDst"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:textSize="12sp"
+                  android:text="0.0.0.0"/>
+          </LinearLayout>
+          EOF
+
+      - name: 📝 TrafficItem.kt
+        run: |
+          cat > app/src/main/java/com/example/networkmonitor/TrafficItem.kt << 'EOF'
+          package com.example.networkmonitor
+
+          data class TrafficItem(
+              val protocol: String,
+              val srcIp: String,
+              val dstIp: String,
+              val srcPort: Int,
+              val dstPort: Int,
+              val length: Int,
+              val timestamp: Long
+          )
+          EOF
+
+      - name: 📝 TrafficBus.kt
+        run: |
+          cat > app/src/main/java/com/example/networkmonitor/TrafficBus.kt << 'EOF'
+          package com.example.networkmonitor
+
+          import kotlinx.coroutines.channels.BufferOverflow
+          import kotlinx.coroutines.flow.MutableSharedFlow
+          import kotlinx.coroutines.flow.SharedFlow
+
+          object TrafficBus {
+              private val _flow = MutableSharedFlow<TrafficItem>(
+                  replay = 0,
+                  extraBufferCapacity = 2000,
+                  onBufferOverflow = BufferOverflow.DROP_OLDEST
+              )
+              val flow: SharedFlow<TrafficItem> = _flow
+              fun emit(item: TrafficItem) { _flow.tryEmit(item) }
+          }
+          EOF
+
+      - name: 📝 MonitorVpnService.kt
+        run: |
+          cat > app/src/main/java/com/example/networkmonitor/MonitorVpnService.kt << 'EOF'
+          package com.example.networkmonitor
+
+          import android.app.Notification
+          import android.app.NotificationChannel
+          import android.app.NotificationManager
+          import android.content.Intent
+          import android.net.VpnService
+          import android.os.Build
+          import android.os.ParcelFileDescriptor
+          import androidx.core.app.NotificationCompat
+          import java.io.FileInputStream
+          import java.io.IOException
+
+          class MonitorVpnService : VpnService() {
+
+              private var tun: ParcelFileDescriptor? = null
+              private var running = false
+              private var worker: Thread? = null
+
+              override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+                  if (intent?.action == ACTION_STOP) { stopVpn(); return START_NOT_STICKY }
+                  startForegroundNotification()
+                  startVpn()
+                  return START_STICKY
+              }
+
+              private fun startForegroundNotification() {
+                  val channelId = "netmon"
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      val mgr = getSystemService(NotificationManager::class.java)
+                      if (mgr.getNotificationChannel(channelId) == null) {
+                          mgr.createNotificationChannel(
+                              NotificationChannel(channelId, "Network Monitor",
+                                  NotificationManager.IMPORTANCE_LOW)
+                          )
+                      }
+                  }
+                  val notif: Notification = NotificationCompat.Builder(this, channelId)
+                      .setContentTitle("Network Monitor active")
+                      .setContentText("Capturing network requests…")
+                      .setSmallIcon(android.R.drawable.stat_sys_download)
+                      .setOngoing(true)
+                      .build()
+                  startForeground(NOTIF_ID, notif)
+              }
+
+              private fun startVpn() {
+                  if (running) return
+                  val builder = Builder()
+                      .setSession("NetworkMonitor")
+                      .addAddress("10.111.222.1", 24)
+                      .addRoute("0.0.0.0", 0)
+                      .addDnsServer("1.1.1.1")
+                      .setBlocking(true)
+                  tun = try { builder.establish() } catch (e: Exception) { null } ?: return
+                  running = true
+                  val fd = tun!!.fileDescriptor
+                  worker = Thread {
+                      val input = FileInputStream(fd)
+                      val buf = ByteArray(32767)
+                      while (running) {
+                          val n = try { input.read(buf) } catch (e: IOException) { break }
+                          if (n > 0) parseAndPublish(buf, n)?.let { TrafficBus.emit(it) }
+                      }
+                  }.also { it.start() }
+              }
+
+              private fun parseAndPublish(p: ByteArray, len: Int): TrafficItem? {
+                  if (len < 20) return null
+                  val version = (p[0].toInt() ushr 4) and 0xF
+                  if (version != 4) return null
+                  val ihl = (p[0].toInt() and 0xF) * 4
+                  val proto = p[9].toInt() and 0xFF
+                  val srcIp = "${p[12].u()}.${p[13].u()}.${p[14].u()}.${p[15].u()}"
+                  val dstIp = "${p[16].u()}.${p[17].u()}.${p[18].u()}.${p[19].u()}"
+                  var srcPort = 0; var dstPort = 0
+                  if ((proto == 6 || proto == 17) && len >= ihl + 4) {
+                      srcPort = ((p[ihl].u()) shl 8) or p[ihl + 1].u()
+                      dstPort = ((p[ihl + 2].u()) shl 8) or p[ihl + 3].u()
+                  }
+                  val protoName = when (proto) {
+                      6 -> "TCP"; 17 -> "UDP"; 1 -> "ICMP"; else -> "IP($proto)"
+                  }
+                  return TrafficItem(protoName, srcIp, dstIp, srcPort, dstPort, len, System.currentTimeMillis())
+              }
+
+              private fun Byte.u() = this.toInt() and 0xFF
+
+              private fun stopVpn() {
+                  running = false
+                  try { worker?.interrupt() } catch (_: Exception) {}
+                  try { tun?.close() } catch (_: Exception) {}
+                  tun = null
+                  stopForeground(true)
+                  stopSelf()
+              }
+
+              override fun onDestroy() { stopVpn(); super.onDestroy() }
+
+              companion object {
+                  const val ACTION_STOP = "com.example.networkmonitor.STOP"
+                  const val NOTIF_ID = 101
+              }
+          }
+          EOF
+
+      - name: 📝 TrafficAdapter.kt
+        run: |
+          cat > app/src/main/java/com/example/networkmonitor/TrafficAdapter.kt << 'EOF'
+          package com.example.networkmonitor
+
+          import android.view.LayoutInflater
+          import android.view.ViewGroup
+          import androidx.recyclerview.widget.RecyclerView
+          import com.example.networkmonitor.databinding.ItemTrafficBinding
+          import java.text.SimpleDateFormat
+          import java.util.Date
+          import java.util.Locale
+
+          class TrafficAdapter : RecyclerView.Adapter<TrafficAdapter.VH>() {
+
+              private val items = ArrayList<TrafficItem>()
+              private val fmt = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
+
+              fun add(item: TrafficItem) {
+                  items.add(0, item)
+                  if (items.size > 500) items.removeAt(items.size - 1)
+                  notifyItemInserted(0)
+              }
+
+              fun clear() { items.clear(); notifyDataSetChanged() }
+
+              override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
+                  val b = ItemTrafficBinding.inflate(LayoutInflater.from(parent.context), parent, false)
+                  return VH(b)
+              }
+
+              override fun onBindViewHolder(holder: VH, position: Int) = holder.bind(items[position])
+              override fun getItemCount() = items.size
+
+              inner class VH(val b: ItemTrafficBinding) : RecyclerView.ViewHolder(b.root) {
+                  fun bind(t: TrafficItem) {
+                      b.txtProto.text = t.protocol
+                      b.txtTime.text = fmt.format(Date(t.timestamp))
+                      b.txtSrc.text = "${t.srcIp}${if (t.srcPort > 0) ":${t.srcPort}" else ""}"
+                      b.txtDst.text = "${t.dstIp}${if (t.dstPort > 0) ":${t.dstPort}" else ""}"
+                      b.txtLen.text = "${t.length} B"
+                  }
+              }
+          }
+          EOF
+
+      - name: 📝 MainActivity.kt
+        run: |
+          cat > app/src/main/java/com/example/networkmonitor/MainActivity.kt << 'EOF'
+          package com.example.networkmonitor
+
+          import android.app.Activity
+          import android.content.Intent
+          import android.net.VpnService
+          import android.os.Build
+          import android.os.Bundle
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.appcompat.app.AppCompatActivity
+          import androidx.lifecycle.lifecycleScope
+          import androidx.recyclerview.widget.LinearLayoutManager
+          import com.example.networkmonitor.databinding.ActivityMainBinding
+          import kotlinx.coroutines.launch
+
+          class MainActivity : AppCompatActivity() {
+
+              private lateinit var b: ActivityMainBinding
+              private val adapter = TrafficAdapter()
+              private var vpnRunning = false
+
+              private val vpnPermission =
+                  registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+                      if (r.resultCode == Activity.RESULT_OK) startVpn()
+                  }
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  b = ActivityMainBinding.inflate(layoutInflater)
+                  setContentView(b.root)
+
+                  b.recycler.layoutManager = LinearLayoutManager(this)
+                  b.recycler.adapter = adapter
+
+                  if (Build.VERSION.SDK_INT >= 33) {
+                      requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 12)
+                  }
+
+                  b.btnToggle.setOnClickListener {
+                      if (vpnRunning) stopVpn() else requestAndStart()
+                  }
+                  b.btnClear.setOnClickListener { adapter.clear() }
+
+                  lifecycleScope.launch {
+                      TrafficBus.flow.collect { adapter.add(it) }
+                  }
+              }
+
+              private fun requestAndStart() {
+                  val prep = VpnService.prepare(this)
+                  if (prep != null) vpnPermission.launch(prep) else startVpn()
+              }
+
+              private fun startVpn() {
+                  val i = Intent(this, MonitorVpnService::class.java)
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(i) else startService(i)
+                  vpnRunning = true
+                  b.btnToggle.text = "STOP MONITORING"
+              }
+
+              private fun stopVpn() {
+                  val i = Intent(this, MonitorVpnService::class.java).apply {
+                      action = MonitorVpnService.ACTION_STOP
+                  }
+                  startService(i)
+                  vpnRunning = false
+                  b.btnToggle.text = "START MONITORING"
+              }
+          }
+          EOF
+
+      - name: 🔧 Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.6
+
+      - name: 🔨 Build Debug APK
+        run: gradle assembleDebug --stacktrace --no-daemon
+
+      - name: 🔨 Build Release APK
+        run: gradle assembleRelease --stacktrace --no-daemon
+        continue-on-error: true
+
+      - name: 📤 Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetworkMonitor-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 📤 Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NetworkMonitor-release-apk
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+          retention-days: 30
